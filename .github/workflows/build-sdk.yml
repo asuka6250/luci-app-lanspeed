@@ -11,8 +11,8 @@ permissions:
 env:
   APK_SDK_URL: https://downloads.immortalwrt.org/releases/25.12.0-rc2/targets/x86/64/immortalwrt-sdk-25.12.0-rc2-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst
   APK_SDK_SHA256: fb665aabb627d3b3a7d98cd426ee90febdb84ceffa6ce4c18fbda934c46053d5
-  APK_AARCH64_SDK_URL: https://downloads.immortalwrt.org/releases/25.12.0-rc2/targets/armsr/armv8/immortalwrt-sdk-25.12.0-rc2-armsr-armv8_gcc-14.3.0_musl.Linux-x86_64.tar.zst
-  APK_AARCH64_SDK_SHA256: 8fd6e4177ad99b567035cbc2825dd060773556249831fad5560cb1ef9eb1e290
+  APK_AARCH64_SDK_URL: https://downloads.openwrt.org/releases/25.12.4/targets/qualcommax/ipq60xx/openwrt-sdk-25.12.4-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+  APK_AARCH64_SDK_SHA256: a9089095e2c9a989d55ac3c6a7cbd974255ec657c3449bacb72597f710a239aa
   IPK_SDK_URL: https://downloads.immortalwrt.org/releases/23.05.6/targets/x86/64/immortalwrt-sdk-23.05.6-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
   IPK_SDK_SHA256: 4dc46a6a612031f14d7d64ca9717895cd8907da7fd01b85f0edee18cb895dc77
   IPK_AARCH64_SDK_URL: https://downloads.immortalwrt.org/releases/23.05.6/targets/armsr/armv8/immortalwrt-sdk-23.05.6-armsr-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
@@ -62,13 +62,13 @@ jobs:
 
       - name: Download public SDKs
         run: |
-          mkdir -p "$RUNNER_TEMP/sdk-apk-base"
-          curl -L "$APK_SDK_URL" -o "$RUNNER_TEMP/sdk-apk-base/sdk.tar.zst"
-          printf '%s  %s\n' "$APK_SDK_SHA256" "$RUNNER_TEMP/sdk-apk-base/sdk.tar.zst" | sha256sum -c -
-          tar --zstd -xf "$RUNNER_TEMP/sdk-apk-base/sdk.tar.zst" -C "$RUNNER_TEMP/sdk-apk-base" --strip-components=1
+          # mkdir -p "$RUNNER_TEMP/sdk-apk-base"
+          # curl -L "$APK_SDK_URL" -o "$RUNNER_TEMP/sdk-apk-base/sdk.tar.zst"
+          # printf '%s  %s\n' "$APK_SDK_SHA256" "$RUNNER_TEMP/sdk-apk-base/sdk.tar.zst" | sha256sum -c -
+          # tar --zstd -xf "$RUNNER_TEMP/sdk-apk-base/sdk.tar.zst" -C "$RUNNER_TEMP/sdk-apk-base" --strip-components=1
 
-          mkdir -p "$RUNNER_TEMP/sdk-apk-bpf"
-          cp -a "$RUNNER_TEMP/sdk-apk-base/." "$RUNNER_TEMP/sdk-apk-bpf/"
+          # mkdir -p "$RUNNER_TEMP/sdk-apk-bpf"
+          # cp -a "$RUNNER_TEMP/sdk-apk-base/." "$RUNNER_TEMP/sdk-apk-bpf/"
 
           mkdir -p "$RUNNER_TEMP/sdk-apk-aarch64-base"
           curl -L "$APK_AARCH64_SDK_URL" -o "$RUNNER_TEMP/sdk-apk-aarch64-base/sdk.tar.zst"
@@ -78,21 +78,21 @@ jobs:
           mkdir -p "$RUNNER_TEMP/sdk-apk-aarch64-bpf"
           cp -a "$RUNNER_TEMP/sdk-apk-aarch64-base/." "$RUNNER_TEMP/sdk-apk-aarch64-bpf/"
 
-          mkdir -p "$RUNNER_TEMP/sdk-ipk-base"
-          curl -L "$IPK_SDK_URL" -o "$RUNNER_TEMP/sdk-ipk-base/sdk.tar.xz"
-          printf '%s  %s\n' "$IPK_SDK_SHA256" "$RUNNER_TEMP/sdk-ipk-base/sdk.tar.xz" | sha256sum -c -
-          tar -xJf "$RUNNER_TEMP/sdk-ipk-base/sdk.tar.xz" -C "$RUNNER_TEMP/sdk-ipk-base" --strip-components=1
+          # mkdir -p "$RUNNER_TEMP/sdk-ipk-base"
+          # curl -L "$IPK_SDK_URL" -o "$RUNNER_TEMP/sdk-ipk-base/sdk.tar.xz"
+          # printf '%s  %s\n' "$IPK_SDK_SHA256" "$RUNNER_TEMP/sdk-ipk-base/sdk.tar.xz" | sha256sum -c -
+          # tar -xJf "$RUNNER_TEMP/sdk-ipk-base/sdk.tar.xz" -C "$RUNNER_TEMP/sdk-ipk-base" --strip-components=1
 
-          mkdir -p "$RUNNER_TEMP/sdk-ipk-bpf"
-          cp -a "$RUNNER_TEMP/sdk-ipk-base/." "$RUNNER_TEMP/sdk-ipk-bpf/"
+          # mkdir -p "$RUNNER_TEMP/sdk-ipk-bpf"
+          # cp -a "$RUNNER_TEMP/sdk-ipk-base/." "$RUNNER_TEMP/sdk-ipk-bpf/"
 
-          mkdir -p "$RUNNER_TEMP/sdk-ipk-aarch64-base"
-          curl -L "$IPK_AARCH64_SDK_URL" -o "$RUNNER_TEMP/sdk-ipk-aarch64-base/sdk.tar.xz"
-          printf '%s  %s\n' "$IPK_AARCH64_SDK_SHA256" "$RUNNER_TEMP/sdk-ipk-aarch64-base/sdk.tar.xz" | sha256sum -c -
-          tar -xJf "$RUNNER_TEMP/sdk-ipk-aarch64-base/sdk.tar.xz" -C "$RUNNER_TEMP/sdk-ipk-aarch64-base" --strip-components=1
+          # mkdir -p "$RUNNER_TEMP/sdk-ipk-aarch64-base"
+          # curl -L "$IPK_AARCH64_SDK_URL" -o "$RUNNER_TEMP/sdk-ipk-aarch64-base/sdk.tar.xz"
+          # printf '%s  %s\n' "$IPK_AARCH64_SDK_SHA256" "$RUNNER_TEMP/sdk-ipk-aarch64-base/sdk.tar.xz" | sha256sum -c -
+          # tar -xJf "$RUNNER_TEMP/sdk-ipk-aarch64-base/sdk.tar.xz" -C "$RUNNER_TEMP/sdk-ipk-aarch64-base" --strip-components=1
 
-          mkdir -p "$RUNNER_TEMP/sdk-ipk-aarch64-bpf"
-          cp -a "$RUNNER_TEMP/sdk-ipk-aarch64-base/." "$RUNNER_TEMP/sdk-ipk-aarch64-bpf/"
+          # mkdir -p "$RUNNER_TEMP/sdk-ipk-aarch64-bpf"
+          # cp -a "$RUNNER_TEMP/sdk-ipk-aarch64-base/." "$RUNNER_TEMP/sdk-ipk-aarch64-bpf/"
 
       - name: Build SDK packages
         run: |
@@ -112,14 +112,14 @@ jobs:
           }
 
           : > "$RUNNER_TEMP/build-pids.txt"
-          run_build apk-base "$RUNNER_TEMP/sdk-apk-base" 0 25.12
-          run_build apk-bpf "$RUNNER_TEMP/sdk-apk-bpf" 1 25.12
+          # run_build apk-base "$RUNNER_TEMP/sdk-apk-base" 0 25.12
+          # run_build apk-bpf "$RUNNER_TEMP/sdk-apk-bpf" 1 25.12
           run_build apk-aarch64-base "$RUNNER_TEMP/sdk-apk-aarch64-base" 0 25.12
           run_build apk-aarch64-bpf "$RUNNER_TEMP/sdk-apk-aarch64-bpf" 1 25.12
-          run_build ipk-base "$RUNNER_TEMP/sdk-ipk-base" 0 23.05 "$IPK_BASE_FEED_REF"
-          run_build ipk-bpf "$RUNNER_TEMP/sdk-ipk-bpf" 1 23.05 "$IPK_BASE_FEED_REF"
-          run_build ipk-aarch64-base "$RUNNER_TEMP/sdk-ipk-aarch64-base" 0 23.05 "$IPK_BASE_FEED_REF"
-          run_build ipk-aarch64-bpf "$RUNNER_TEMP/sdk-ipk-aarch64-bpf" 1 23.05 "$IPK_BASE_FEED_REF"
+          # run_build ipk-base "$RUNNER_TEMP/sdk-ipk-base" 0 23.05 "$IPK_BASE_FEED_REF"
+          # run_build ipk-bpf "$RUNNER_TEMP/sdk-ipk-bpf" 1 23.05 "$IPK_BASE_FEED_REF"
+          # run_build ipk-aarch64-base "$RUNNER_TEMP/sdk-ipk-aarch64-base" 0 23.05 "$IPK_BASE_FEED_REF"
+          # run_build ipk-aarch64-bpf "$RUNNER_TEMP/sdk-ipk-aarch64-bpf" 1 23.05 "$IPK_BASE_FEED_REF"
 
           status=0
           while read -r pid name log_file; do
@@ -166,18 +166,18 @@ jobs:
             fi
           }
 
-          collect_one "$RUNNER_TEMP/sdk-apk-base" "lanspeedd-${code_version}.apk"
-          collect_one "$RUNNER_TEMP/sdk-apk-bpf" "lanspeedd-bpf-${code_version}.apk"
-          collect_one "$RUNNER_TEMP/sdk-apk-base" "luci-app-lanspeed-${code_version}.apk"
+          # collect_one "$RUNNER_TEMP/sdk-apk-base" "lanspeedd-${code_version}.apk"
+          # collect_one "$RUNNER_TEMP/sdk-apk-bpf" "lanspeedd-bpf-${code_version}.apk"
+          # collect_one "$RUNNER_TEMP/sdk-apk-base" "luci-app-lanspeed-${code_version}.apk"
           collect_one "$RUNNER_TEMP/sdk-apk-aarch64-base" "lanspeedd-${code_version}.apk" "lanspeedd-${code_version}-aarch64.apk"
           collect_one "$RUNNER_TEMP/sdk-apk-aarch64-bpf" "lanspeedd-bpf-${code_version}.apk" "lanspeedd-bpf-${code_version}-aarch64.apk"
           collect_one "$RUNNER_TEMP/sdk-apk-aarch64-base" "luci-app-lanspeed-${code_version}.apk" "luci-app-lanspeed-${code_version}-aarch64.apk"
-          collect_one "$RUNNER_TEMP/sdk-ipk-base" "lanspeedd_${ipk_version}_*.ipk"
-          collect_one "$RUNNER_TEMP/sdk-ipk-bpf" "lanspeedd-bpf_${ipk_version}_*.ipk"
-          collect_one "$RUNNER_TEMP/sdk-ipk-base" "luci-app-lanspeed_${ipk_version}_*.ipk"
-          collect_one "$RUNNER_TEMP/sdk-ipk-aarch64-base" "lanspeedd_${ipk_version}_*.ipk" "lanspeedd_${ipk_version}_aarch64.ipk"
-          collect_one "$RUNNER_TEMP/sdk-ipk-aarch64-bpf" "lanspeedd-bpf_${ipk_version}_*.ipk" "lanspeedd-bpf_${ipk_version}_aarch64.ipk"
-          collect_one "$RUNNER_TEMP/sdk-ipk-aarch64-base" "luci-app-lanspeed_${ipk_version}_*.ipk" "luci-app-lanspeed_${ipk_version}_aarch64.ipk"
+          # collect_one "$RUNNER_TEMP/sdk-ipk-base" "lanspeedd_${ipk_version}_*.ipk"
+          # collect_one "$RUNNER_TEMP/sdk-ipk-bpf" "lanspeedd-bpf_${ipk_version}_*.ipk"
+          # collect_one "$RUNNER_TEMP/sdk-ipk-base" "luci-app-lanspeed_${ipk_version}_*.ipk"
+          # collect_one "$RUNNER_TEMP/sdk-ipk-aarch64-base" "lanspeedd_${ipk_version}_*.ipk" "lanspeedd_${ipk_version}_aarch64.ipk"
+          # collect_one "$RUNNER_TEMP/sdk-ipk-aarch64-bpf" "lanspeedd-bpf_${ipk_version}_*.ipk" "lanspeedd-bpf_${ipk_version}_aarch64.ipk"
+          # collect_one "$RUNNER_TEMP/sdk-ipk-aarch64-base" "luci-app-lanspeed_${ipk_version}_*.ipk" "luci-app-lanspeed_${ipk_version}_aarch64.ipk"
 
           if [ ! -s "$file_list" ]; then
             printf '%s\n' "error: no release files were collected" >&2

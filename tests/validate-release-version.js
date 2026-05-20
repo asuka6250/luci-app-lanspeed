@@ -65,8 +65,8 @@ try {
   assert(workflow.includes('IPK_SDK_URL:'), 'workflow must define a dedicated IPK SDK URL');
   assert(workflow.includes('APK_AARCH64_SDK_URL:'), 'workflow must define a dedicated APK aarch64 SDK URL');
   assert(workflow.includes('IPK_AARCH64_SDK_URL:'), 'workflow must define a dedicated IPK aarch64 SDK URL');
-  assert(workflow.includes('https://downloads.immortalwrt.org/releases/25.12.0-rc2/targets/armsr/armv8/immortalwrt-sdk-25.12.0-rc2-armsr-armv8_gcc-14.3.0_musl.Linux-x86_64.tar.zst'), 'workflow must use the official APK aarch64 SDK URL');
-  assert(workflow.includes('8fd6e4177ad99b567035cbc2825dd060773556249831fad5560cb1ef9eb1e290'), 'workflow must pin the official APK aarch64 SDK checksum');
+  assert(workflow.includes('https://downloads.openwrt.org/releases/25.12.4/targets/qualcommax/ipq60xx/openwrt-sdk-25.12.4-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst'), 'workflow must use the customized OpenWrt aarch64 SDK URL');
+  assert(workflow.includes('a9089095e2c9a989d55ac3c6a7cbd974255ec657c3449bacb72597f710a239aa'), 'workflow must pin the customized OpenWrt aarch64 SDK checksum');
   assert(workflow.includes('https://downloads.immortalwrt.org/releases/23.05.6/targets/armsr/armv8/immortalwrt-sdk-23.05.6-armsr-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz'), 'workflow must use the official IPK aarch64 SDK URL');
   assert(workflow.includes('a56748c4d70b956102d4a728418d9b7bcf1208b526816221b4389597a24238fa'), 'workflow must pin the official IPK aarch64 SDK checksum');
   assert(workflow.includes('IPK_BASE_FEED_REF:'), 'workflow must pin the IPK SDK base feed to the release source commit');
@@ -113,7 +113,6 @@ try {
   assert(!workflow.includes('ramips'), 'workflow must not add non-aarch64 ramips SDK targets');
   assert(!workflow.includes('ath79'), 'workflow must not add non-aarch64 ath79 SDK targets');
   assert(!workflow.includes('ipq40xx'), 'workflow must not add non-aarch64 ipq40xx SDK targets');
-  assert(!workflow.includes('qualcommax'), 'workflow must not split aarch64 into Qualcomm SDK targets');
   assert(!workflow.includes('mediatek'), 'workflow must not split aarch64 into MediaTek SDK targets');
   assert(!workflow.includes('rockchip'), 'workflow must not split aarch64 into Rockchip SDK targets');
   assertBefore(workflow, 'file_list="$RUNNER_TEMP/release/files.txt"', 'collect_one "$RUNNER_TEMP/sdk-apk-base" "lanspeedd-${code_version}.apk"', 'workflow must create the release file list before collecting files');
