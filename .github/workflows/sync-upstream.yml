@@ -1,0 +1,186 @@
+name: Sync Upstream
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 16 * * 1'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.MY_SYNC_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch Upstream
+        run: |
+          git remote add upstream https://github.com/qimaoww/luci-app-lanspeed.git
+          git fetch upstream
+
+      - name: Get Current Upstream Hash
+        id: upstream_hash
+        run: |
+          HASH=$(git rev-parse upstream/master)
+          echo "latest_hash=$HASH" >> $GITHUB_OUTPUT
+          echo "Current upstream hash: $HASH"
+
+      - name: Restore Upstream Hash Cache
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .upstream_hash_cache
+          key: upstream-hash-${{ steps.upstream_hash.outputs.latest_hash }}
+          restore-keys: |
+            upstream-hash-
+
+      - name: Verify Cache Changes
+        id: check_changes
+        run: |
+          LATEST_HASH="${{ steps.upstream_hash.outputs.latest_hash }}"
+          STORED_HASH=""
+          
+          if [ -f ".upstream_hash_cache" ]; then
+            STORED_HASH=$(cat .upstream_hash_cache)
+          fi
+          
+          echo "Stored hash from cache: $STORED_HASH"
+          echo "Latest upstream hash: $LATEST_HASH"
+          
+          if [ "$STORED_HASH" = "$LATEST_HASH" ]; then
+            echo "Upstream hash matches the cache. No new updates."
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+          else
+            echo "Upstream hash has changed or no cache exists. Proceeding with sync."
+            echo "has_updates=true" >> $GITHUB_OUTPUT
+            echo "$LATEST_HASH" > .upstream_hash_cache
+          fi
+
+      - name: Delete Old Upstream Hash Cache
+        if: steps.check_changes.outputs.has_updates == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.MY_SYNC_TOKEN }}
+        run: |
+          echo "Upstream updated. Clearing previous upstream-hash- caches to prevent pollution..."
+          gh cache list --limit 100 | grep 'upstream-hash-' | cut -f 1 | while read -r cache_key; do
+            if [ -n "$cache_key" ]; then
+              echo "Deleting old cache: $cache_key"
+              gh cache delete "$cache_key" --confirm || true
+            fi
+          done
+
+      - name: Save New Upstream Hash To Cache
+        if: steps.check_changes.outputs.has_updates == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .upstream_hash_cache
+          key: upstream-hash-${{ steps.upstream_hash.outputs.latest_hash }}
+
+      - name: Reset to Upstream Base
+        if: steps.check_changes.outputs.has_updates == 'true'
+        run: |
+          cp .github/workflows/sync-upstream.yml /tmp/sync-upstream.yml
+          git reset --hard upstream/master
+          mkdir -p .github/workflows
+          cp /tmp/sync-upstream.yml .github/workflows/sync-upstream.yml
+
+      - name: Patch JSON
+        if: steps.check_changes.outputs.has_updates == 'true'
+        run: |
+          TARGET_FILE="applications/luci-app-lanspeed/root/usr/share/luci/menu.d/luci-app-lanspeed.json"
+          if [ -f "$TARGET_FILE" ]; then
+            jq '."admin/status/lanspeed".title = "实时流量"' "$TARGET_FILE" > tmp.json && mv tmp.json "$TARGET_FILE"
+          fi
+          
+          sed -i 's/ifup|ifupdate)/ifup)/g' net/lanspeedd/files/etc/hotplug.d/iface/90-lanspeedd
+
+
+      - name: Patch Build SDK Workflow
+        if: steps.check_changes.outputs.has_updates == 'true'
+        run: |
+          TARGET_YML=".github/workflows/build-sdk.yml"
+          if [ -f "$TARGET_YML" ]; then
+            # 1. 更新定制的 aarch64 SDK URL 和校验 Hash
+            sed -i 's|APK_AARCH64_SDK_URL:.*|APK_AARCH64_SDK_URL: https://downloads.openwrt.org/releases/25.12.4/targets/qualcommax/ipq60xx/openwrt-sdk-25.12.4-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst|g' "$TARGET_YML"
+            sed -i 's|APK_AARCH64_SDK_SHA256:.*|APK_AARCH64_SDK_SHA256: a9089095e2c9a989d55ac3c6a7cbd974255ec657c3449bacb72597f710a239aa|g' "$TARGET_YML"
+            
+            # 2. 针对下载和目录创建行：不改变行首的缩进空格，在第一个有效字符串前面注入 "# "
+            sed -i 's|mkdir -p "\$RUNNER_TEMP/sdk-apk-base"|# &|g' "$TARGET_YML"
+            sed -i 's|curl -L "\$APK_SDK_URL"|# &|g' "$TARGET_YML"
+            sed -i 's|printf '\''%s  %s\\n'\'' "\$APK_SDK_SHA256"|# &|g' "$TARGET_YML"
+            sed -i 's|tar --zstd -xf "\$RUNNER_TEMP/sdk-apk-base|# &|g' "$TARGET_YML"
+            sed -i 's|mkdir -p "\$RUNNER_TEMP/sdk-apk-bpf"|# &|g' "$TARGET_YML"
+            sed -i 's|cp -a "\$RUNNER_TEMP/sdk-apk-base|# &|g' "$TARGET_YML"
+            sed -i 's|cp -a "\$RUNNER_TEMP/sdk-ipk-aarch64-base|# &|g' "$TARGET_YML"
+            sed -i 's|cp -a "\$RUNNER_TEMP/sdk-ipk-base|# &|g' "$TARGET_YML"
+            sed -i 's|mkdir -p "\$RUNNER_TEMP/sdk-ipk-|# &|g' "$TARGET_YML"
+            sed -i 's|curl -L "\$IPK_|# &|g' "$TARGET_YML"
+            sed -i 's|printf '\''%s  %s\\n'\'' "\$IPK_|# &|g' "$TARGET_YML"
+            sed -i 's|tar -xJf "\$RUNNER_TEMP/sdk-ipk-|# &|g' "$TARGET_YML"
+
+            # 3. 针对编译行（run_build）：同样在第一个非空字符前加 "# "
+            sed -i 's|run_build apk-base|# &|g' "$TARGET_YML"
+            sed -i 's|run_build apk-bpf|# &|g' "$TARGET_YML"
+            sed -i 's|run_build ipk-|# &|g' "$TARGET_YML"
+
+            # 4. 针对文件收集行（collect_one）：同样在第一个非空字符前加 "# "
+            sed -i 's|collect_one "\$RUNNER_TEMP/sdk-apk-base"|# &|g' "$TARGET_YML"
+            sed -i 's|collect_one "\$RUNNER_TEMP/sdk-apk-bpf"|# &|g' "$TARGET_YML"
+            sed -i 's|collect_one "\$RUNNER_TEMP/sdk-ipk-|# &|g' "$TARGET_YML"
+          fi
+
+      - name: Patch Test Script Assertions
+        if: steps.check_changes.outputs.has_updates == 'true'
+        run: |
+          TEST_FILE="tests/validate-release-version.js"
+          if [ -f "$TEST_FILE" ]; then
+            sed -i "/qualcommax/d" "$TEST_FILE"
+            sed -i 's|https://downloads.immortalwrt.org/releases/25.12.0-rc2/targets/armsr/armv8/immortalwrt-sdk-25.12.0-rc2-armsr-armv8_gcc-14.3.0_musl.Linux-x86_64.tar.zst|https://downloads.openwrt.org/releases/25.12.4/targets/qualcommax/ipq60xx/openwrt-sdk-25.12.4-qualcommax-ipq60xx_gcc-14.3.0_musl.Linux-x86_64.tar.zst|g' "$TEST_FILE"
+            sed -i 's|workflow must use the official APK aarch64 SDK URL|workflow must use the customized OpenWrt aarch64 SDK URL|g' "$TEST_FILE"
+            
+            sed -i 's|8fd6e4177ad99b567035cbc2825dd060773556249831fad5560cb1ef9eb1e290|a9089095e2c9a989d55ac3c6a7cbd974255ec657c3449bacb72597f710a239aa|g' "$TEST_FILE"
+            sed -i 's|workflow must pin the official APK aarch64 SDK checksum|workflow must pin the customized OpenWrt aarch64 SDK checksum|g' "$TEST_FILE"
+          fi
+
+      - name: Push Changes & Smart Tagging
+        if: steps.check_changes.outputs.has_updates == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.MY_SYNC_TOKEN }}
+        run: |
+          TARGET_FILE="applications/luci-app-lanspeed/root/usr/share/luci/menu.d/luci-app-lanspeed.json"
+          TARGET_YML=".github/workflows/build-sdk.yml"
+          TEST_FILE="tests/validate-release-version.js"
+          MAKEFILE_FILE="net/lanspeedd/Makefile"
+          
+          git add "$TARGET_FILE" "$TARGET_YML" "$TEST_FILE" .github/workflows/sync-upstream.yml
+          git commit -am "chore: sync upstream, patch sdk requirements and bypass qualcommax check, set menu title to 实时流量"
+          git push origin master --force
+          
+          if [ -f "$MAKEFILE_FILE" ]; then
+            VERSION=$(grep -E '^PKG_VERSION:=' "$MAKEFILE_FILE" | cut -d'=' -f2 | tr -d ' \r\n')
+            RELEASE=$(grep -E '^PKG_RELEASE:=' "$MAKEFILE_FILE" | cut -d'=' -f2 | tr -d ' \r\n')
+            
+            if [ -n "$VERSION" ] && [ -n "$RELEASE" ]; then
+              TAG_NAME="v${VERSION}-r${RELEASE}"
+              
+              if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+                echo "Tag $TAG_NAME exists but upstream has new commits. Re-creating tag to point to latest commit..."
+                git tag -d "$TAG_NAME"
+                git push origin :refs/tags/"$TAG_NAME"
+                
+                git tag "$TAG_NAME"
+                git push origin "$TAG_NAME"
+              else
+                echo "New version detected. Creating tag $TAG_NAME..."
+                git tag "$TAG_NAME"
+                git push origin "$TAG_NAME"
+              fi
+            fi
+          fi
