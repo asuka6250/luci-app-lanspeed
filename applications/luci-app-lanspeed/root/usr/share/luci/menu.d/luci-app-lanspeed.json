@@ -1,12 +1,14 @@
 {
   "admin/status/lanspeed": {
-    "title": "客户端网速",
+    "title": "实时流量",
     "order": 90,
     "action": {
       "type": "firstchild"
     },
     "depends": {
-      "acl": [ "luci-app-lanspeed" ]
+      "acl": [
+        "luci-app-lanspeed"
+      ]
     }
   },
   "admin/status/lanspeed/overview": {
@@ -17,7 +19,9 @@
       "path": "lanspeed/index"
     },
     "depends": {
-      "acl": [ "luci-app-lanspeed" ]
+      "acl": [
+        "luci-app-lanspeed"
+      ]
     }
   },
   "admin/status/lanspeed/config": {
@@ -28,7 +32,9 @@
       "path": "lanspeed/config"
     },
     "depends": {
-      "acl": [ "luci-app-lanspeed" ]
+      "acl": [
+        "luci-app-lanspeed"
+      ]
     }
   }
 }
