@@ -6,6 +6,7 @@ const path = require('path');
 const root = path.resolve(__dirname, '..');
 const pkgMakefile = fs.readFileSync(path.join(root, 'net/lanspeedd/Makefile'), 'utf8');
 const srcMakefile = fs.readFileSync(path.join(root, 'net/lanspeedd/src/Makefile'), 'utf8');
+const luciMakefile = fs.readFileSync(path.join(root, 'applications/luci-app-lanspeed/Makefile'), 'utf8');
 
 function assert(condition, message) {
   if (!condition) {
@@ -74,6 +75,11 @@ try {
   );
   assertMatch(
     pkgMakefile,
+    /DEFAULT:=y if PACKAGE_luci-app-lanspeed && HAS_BPF_TOOLCHAIN/,
+    'optional BPF package must default on when the LuCI app and BPF toolchain are selected'
+  );
+  assertMatch(
+    pkgMakefile,
     /DEPENDS:=\+libubox \+libubus \+libuci \+libblobmsg-json \+libjson-c \+libmnl \+kmod-nf-conntrack-netlink/,
     'base lanspeedd package must keep only non-BPF runtime dependencies'
   );
@@ -137,6 +143,20 @@ try {
     /lanspeed_bpf_plugin\.so: lanspeed_bpf\.c lanspeed_bpf\.h/,
     'src Makefile must build the optional plugin from the real libbpf loader'
   );
+  [
+    'statusStyleCompatLive.js',
+    'statusStyleCompatLive2.js',
+    'statusStyleCompatLive3.js',
+    'statusViewLive.js',
+    'statusViewLive2.js',
+    'statusViewLive3.js'
+  ].forEach((name) => {
+    assertMatch(
+      luciMakefile,
+      new RegExp(`htdocs/luci-static/resources/lanspeed/${name.replace('.', '\\.')}`),
+      `luci-app-lanspeed/Makefile must install resources/lanspeed/${name}`
+    );
+  });
 
   console.log('validate-lanspeed-packaging: PASS');
 } catch (error) {

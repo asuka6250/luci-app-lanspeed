@@ -624,11 +624,73 @@ function normalizeIp(ip) {
   }
 }
 
+function ipv4ToInt(ip) {
+  const parts = String(ip).split('.');
+  if (parts.length !== 4) {
+    return null;
+  }
+  let value = 0;
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) {
+      return null;
+    }
+    const octet = Number.parseInt(part, 10);
+    if (octet < 0 || octet > 255) {
+      return null;
+    }
+    value = ((value << 8) | octet) >>> 0;
+  }
+  return value >>> 0;
+}
+
+function ipv4InCidr(ip, cidr) {
+  const [base, bitsText] = String(cidr).split('/');
+  const ipInt = ipv4ToInt(ip);
+  const baseInt = ipv4ToInt(base);
+  const bits = Number.parseInt(bitsText, 10);
+  if (ipInt === null || baseInt === null || !Number.isInteger(bits) || bits < 0 || bits > 32) {
+    return false;
+  }
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return (ipInt & mask) === (baseInt & mask);
+}
+
+function interfaceFilterEnabled(fixture) {
+  return Array.isArray(fixture.collect_ifnames) && fixture.collect_ifnames.length > 0;
+}
+
+function interfacePrefixes(fixture, ifname) {
+  const selected = new Set(fixture.collect_ifnames || []);
+
+  if (!interfaceFilterEnabled(fixture) || !selected.has(ifname)) {
+    return [];
+  }
+
+  return (fixture.interface_addresses || [])
+    .filter((addr) => addr.interface === ifname && typeof addr.address === 'string')
+    .map((addr) => addr.address);
+}
+
+function identityAddressAllowedByCollectedInterface(entry, fixture) {
+  const ip = normalizeIp(entry.ip);
+  const ifname = entry.interface || 'br-lan';
+  const prefixes = interfacePrefixes(fixture, ifname);
+
+  if (!interfaceFilterEnabled(fixture)) {
+    return true;
+  }
+
+  return prefixes.some((cidr) => ipv4InCidr(ip, cidr));
+}
+
 function buildArpMap(fixture) {
   const entries = new Map();
 
   for (const entry of (fixture.arp_entries || []).concat(fixture.neighbor_entries || [])) {
     if (isExcludedIdentityInterface(entry.interface || '')) {
+      continue;
+    }
+    if (!identityAddressAllowedByCollectedInterface(entry, fixture)) {
       continue;
     }
     const ip = normalizeIp(entry.ip);
@@ -654,19 +716,23 @@ function buildArpByMacZone(fixture) {
     if (!entry.mac || isExcludedIdentityInterface(entry.interface || '')) {
       continue;
     }
+    if (!identityAddressAllowedByCollectedInterface(entry, fixture)) {
+      continue;
+    }
 
     const mac = entry.mac.toLowerCase();
     const zone = entry.zone || 'lan';
     const key = `${mac}@${zone}`;
 
     if (!entries.has(key)) {
-      entries.set(key, {
-        ip: normalizeIp(entry.ip),
-        mac,
-        zone,
-        interface: entry.interface || 'br-lan'
-      });
+      entries.set(key, []);
     }
+    entries.get(key).push({
+      ip: normalizeIp(entry.ip),
+      mac,
+      zone,
+      interface: entry.interface || 'br-lan'
+    });
   }
 
   return entries;
@@ -680,7 +746,8 @@ function simulateBpfIdentityFolding(fixture) {
   for (const sample of fixture.raw_bpf_samples || []) {
     const mac = sample.mac.toLowerCase();
     const zone = sample.zone || 'lan';
-    const identity = arpByMacZone.get(`${mac}@${zone}`);
+    const identities = arpByMacZone.get(`${mac}@${zone}`) || [];
+    const identity = identities[0];
 
     if (!identity) {
       skippedNoIdentity += 1;
@@ -698,8 +765,10 @@ function simulateBpfIdentityFolding(fixture) {
       rx_bytes: 0
     };
 
-    if (identity.ip && !client.ips.includes(identity.ip)) {
-      client.ips.push(identity.ip);
+    for (const item of identities) {
+      if (item.ip && !client.ips.includes(item.ip)) {
+        client.ips.push(item.ip);
+      }
     }
     if (sample.direction === 'tx') {
       client.tx_bytes += sample.bytes || 0;
@@ -1163,7 +1232,7 @@ function simulateNssSourceSelection(fixture) {
   const bpfFullAvailable = Boolean(fixture.config.bpf_full_available);
   const daeEarlyBpf = Boolean(fixture.config.dae_early_bpf);
   const rateMode = fixture.config.rate_collector_mode || 'auto';
-  const daedActive = Boolean(
+  const daeActive = Boolean(
     probe.dae_running ||
     probe.daed_running ||
     probe.dae_process ||
@@ -1172,13 +1241,13 @@ function simulateNssSourceSelection(fixture) {
   const forceBpf = rateMode === 'bpf';
   const forceNssDirect = rateMode === 'nss_ecm_direct';
   const forceNssSync = rateMode === 'nss_conntrack_sync';
-  const nssDaedPreferBpf = Boolean(rateMode === 'auto' && probe.nss_present && daedActive && bpfFullAvailable);
+  const daePreferBpf = Boolean(rateMode === 'auto' && daeActive && bpfFullAvailable);
   const directReadable = probe.nss_ecm_direct_readable !== false;
   const autoNssSyncAvailable = Boolean(
     !forceBpf &&
     !forceNssSync &&
     !forceNssDirect &&
-    !nssDaedPreferBpf &&
+    !daePreferBpf &&
     fixture.config.enable_conntrack_fallback &&
     probe.nf_conntrack_acct &&
     probe.nss_present &&
@@ -1188,7 +1257,7 @@ function simulateNssSourceSelection(fixture) {
     !forceBpf &&
     !forceNssSync &&
     !autoNssSyncAvailable &&
-    !nssDaedPreferBpf &&
+    !daePreferBpf &&
     fixture.config.enable_conntrack_fallback &&
     probe.nss_present &&
     probe.nss_ecm_active &&
@@ -1197,7 +1266,7 @@ function simulateNssSourceSelection(fixture) {
   );
   const syncPreferred = Boolean(
     !forceBpf &&
-    !nssDaedPreferBpf &&
+    !daePreferBpf &&
     fixture.config.enable_conntrack_fallback &&
     probe.nf_conntrack_acct &&
     probe.nss_present &&
@@ -1213,19 +1282,19 @@ function simulateNssSourceSelection(fixture) {
       addUnique(warnings, directPreferred ? 'nss_prefers_direct' : 'nss_prefers_conntrack_sync');
     }
   }
-  if (nssDaedPreferBpf)
-    addUnique(warnings, 'nss_daed_prefers_bpf');
-  if (probe.nss_present && daedActive && !bpfFullAvailable && preferred)
-    addUnique(warnings, 'nss_daed_nss_fallback_may_be_inaccurate');
+  if (daePreferBpf)
+    addUnique(warnings, 'dae_runtime_prefers_bpf');
+  if (probe.nss_present && daeActive && !bpfFullAvailable && preferred)
+    addUnique(warnings, 'nss_dae_bpf_fallback_may_be_inaccurate');
 
   return {
-    preferred: preferred || nssDaedPreferBpf,
+    preferred: preferred || daePreferBpf,
     dae_early_bpf: Boolean(probe.dae_preempts_lan_ingress && daeEarlyBpf),
     dae_preempted: false,
-    primary_source: nssDaedPreferBpf ? 'bpf' : (directPreferred ? 'nss_ecm_direct' : (syncPreferred ? 'nss_conntrack_sync' : (bpfFullAvailable ? 'bpf' : 'unsupported'))),
-    collector_mode: nssDaedPreferBpf ? 'bpf' : (directPreferred ? 'nss_ecm_direct' : (syncPreferred ? 'conntrack_ecm_sync' : (bpfFullAvailable ? 'bpf' : 'unsupported'))),
-    confidence: nssDaedPreferBpf ? 'high' : (directPreferred ? 'high' : (syncPreferred ? 'medium' : (bpfFullAvailable ? 'high' : 'unsupported'))),
-    coverage_client_source: nssDaedPreferBpf ? 'bpf' : (directPreferred ? 'nss_ecm_direct' : (syncPreferred ? 'conntrack' : (bpfFullAvailable ? 'bpf' : 'unsupported'))),
+    primary_source: daePreferBpf ? 'bpf' : (directPreferred ? 'nss_ecm_direct' : (syncPreferred ? 'nss_conntrack_sync' : (bpfFullAvailable ? 'bpf' : 'unsupported'))),
+    collector_mode: daePreferBpf ? 'bpf' : (directPreferred ? 'nss_ecm_direct' : (syncPreferred ? 'conntrack_ecm_sync' : (bpfFullAvailable ? 'bpf' : 'unsupported'))),
+    confidence: daePreferBpf ? 'high' : (directPreferred ? 'high' : (syncPreferred ? 'medium' : (bpfFullAvailable ? 'high' : 'unsupported'))),
+    coverage_client_source: daePreferBpf ? 'bpf' : (directPreferred ? 'nss_ecm_direct' : (syncPreferred ? 'conntrack' : (bpfFullAvailable ? 'bpf' : 'unsupported'))),
     warnings
   };
 }
@@ -1518,9 +1587,17 @@ function assertRuntimeConntrackFallbackSource(source) {
     'NETLINK_ROUTE',
     'NDA_DST',
     'NDA_LLADDR',
+    'RTM_GETADDR',
+    'IFA_ADDRESS',
+    'IFA_LOCAL',
     'AF_INET6',
     'bool read_neighbor_table',
     'size_t load_lan_identity_table',
+    'struct lan_identity_filter',
+    'lanspeed.main.ifname',
+    'lanspeed.main.interface_include',
+    'load_lan_identity_filter',
+    'identity_entry_allowed_by_collected_interface',
     'bool flow_endpoint_lookup',
     'bool nss_ecm_direct_endpoint_lookup',
     'void normalize_mac_address',
@@ -1564,12 +1641,11 @@ function assertRuntimeConntrackFallbackSource(source) {
          source.includes('"both_lan_flows"'),
          'NSS sync evidence must expose endpoint match diagnostics');
   assert(source.includes('json_object_new_string("nss_prefers_conntrack_sync")'), 'runtime must explain why NSS sync overrides available BPF metrics');
-  assert(source.includes('static bool daed_runtime_active'), 'runtime must distinguish running daed from installed daed config');
-  assert(source.includes('dae_running') && source.includes('daed_running'), 'runtime must expose daed running state separately from service/config presence');
-  assert(source.includes('process_running') || source.includes('pidof dae daed'), 'runtime must verify a real dae/daed process before treating daed as running');
-  assert(source.includes('static bool nss_daed_should_prefer_bpf'), 'runtime must prefer BPF on NSS devices when daed is running');
-  assert(source.includes('json_object_new_string("nss_daed_prefers_bpf")'), 'runtime must explain when NSS+daed uses BPF');
-  assert(source.includes('json_object_new_string("nss_daed_nss_fallback_may_be_inaccurate")'), 'runtime must warn when NSS+daed falls back to NSS rates');
+  assert(source.includes('static bool dae_runtime_active'), 'runtime must distinguish running dae/daed from installed config');
+  assert(source.includes('dae_running') && source.includes('daed_running'), 'runtime must expose dae/daed running state separately from service/config presence');
+  assert(source.includes('static bool dae_runtime_should_prefer_bpf'), 'runtime auto mode must prefer BPF whenever dae or daed is running');
+  assert(source.includes('json_object_new_string("dae_runtime_prefers_bpf")'), 'runtime must explain when dae/daed selects BPF');
+  assert(source.includes('json_object_new_string("nss_dae_bpf_fallback_may_be_inaccurate")'), 'runtime must warn when NSS+dae falls back to NSS rates');
   assert(source.includes('static bool dae_tc_preempts_bpf_ingress'), 'runtime must detect DAE/daed tc filters that run before lanspeed ingress');
   assert(source.includes('json_object_new_string("dae_tc_preempts_bpf_ingress")'), 'runtime must explain when DAE tc preemption is detected');
   assert(source.includes('static void bpf_runtime_reset_rate_state'), 'runtime must reset BPF rate baselines after TC policy changes');
@@ -1578,7 +1654,8 @@ function assertRuntimeConntrackFallbackSource(source) {
   assert(/bpf_runtime_refresh_attach_policy\(&probe\)[\s\S]{0,420}?finish_probe_evidence\(&probe,\s*"status"\)/.test(source), 'status_method must refresh TC policy before publishing self-heal evidence');
   assert(/bpf_runtime_refresh_attach_policy\(&probe\)[\s\S]{0,420}?finish_probe_evidence\(&probe,\s*"health"\)/.test(source), 'health_method must refresh TC policy before publishing self-heal evidence');
   assert(/static void bpf_collect_tick[\s\S]{0,520}?bpf_runtime_refresh_attach_policy\(&probe\)[\s\S]{0,220}?bpf_runtime_recover_if_needed\("periodic_tc_filter_check"\)/.test(source), 'periodic BPF tick must refresh TC policy before sampling');
-  assert(/bpf_runtime_early_passthrough\s*=\s*want_early/.test(source), 'runtime policy refresh must switch the daemon to early pass-through when daed preempts LAN hooks');
+  assert(/want_early\s*=\s*dae_tc_preempts_bpf_ingress\(probe\)\s*\|\|\s*dae_runtime_active\(probe\)/.test(source), 'running dae/daed must switch the daemon to early BPF pass-through');
+  assert(/bpf_runtime_early_passthrough\s*=\s*want_early/.test(source), 'runtime policy refresh must apply the selected early pass-through mode');
   assert(!/dae_tc_preempts_bpf_ingress\(probe\)[\s\S]{0,120}?conntrack_primary_preferred/.test(source), 'DAE tc preemption must not force conntrack as the primary rate source');
   assert(!source.includes('json_object_new_string("fixture-client")'), 'runtime must not fabricate fixture clients');
   assert(source.includes('json_object_object_add(client, "mac", json_object_new_string(current[i].mac))'), 'runtime client MAC must come from ARP-mapped sample');
@@ -1737,6 +1814,7 @@ function assertRuntimeProbeHotPathPolicy(source) {
   const healthBody = extractFunctionBody(source, 'health_method');
   const tickBody = extractFunctionBody(source, 'bpf_collect_tick');
   const cachedProbeBody = extractFunctionBody(source, 'load_cached_runtime_probe');
+  const processBody = extractFunctionBody(source, 'process_running');
 
   assert(statusBody.includes('load_cached_runtime_probe(&probe)'),
          'status_method must use cached/direct probe state');
@@ -1759,8 +1837,13 @@ function assertRuntimeProbeHotPathPolicy(source) {
          !cachedProbeBody.includes('inspect_ubus(probe)') &&
          !cachedProbeBody.includes('inspect_dae_runtime(probe)'),
          'cached runtime probes must not execute shell-backed diagnostic probes');
-  assert(cachedProbeBody.includes('inspect_files_direct(probe)'),
+  assert(cachedProbeBody.includes('refresh_dae_process_state(probe)') &&
+         cachedProbeBody.includes('inspect_files_direct(probe)'),
          'cached runtime probes must use direct file/API refresh only');
+  assert(processBody.includes('opendir("/proc")') &&
+         processBody.includes('/comm') &&
+         !processBody.includes('run_command_capture'),
+         'dae/daed process refresh must inspect procfs directly without spawning shell commands');
 }
 
 function assertRuntimeNssDirectSource(source, collectorModel, indexSource, nssPanelSource) {
@@ -2070,7 +2153,10 @@ const hotplugScript = fs.readFileSync(path.join(root, 'net/lanspeedd/files/etc/h
 const defaultConfig = fs.readFileSync(path.join(root, 'net/lanspeedd/files/etc/config/lanspeed'), 'utf8');
 const statusResourceDir = path.join(root, 'applications/luci-app-lanspeed/htdocs/luci-static/resources');
 const indexSource = [
-  'view/lanspeed/index.js',
+  'view/lanspeed/index_live4.js',
+  'lanspeed/statusViewLive.js',
+  'lanspeed/statusViewLive2.js',
+  'lanspeed/statusViewLive3.js',
   'lanspeed/statusCollector.js',
   'lanspeed/statusRefresh.js'
 ].map((relativePath) => fs.readFileSync(path.join(statusResourceDir, relativePath), 'utf8')).join('\n');
@@ -2139,6 +2225,31 @@ assert(bpfAttached.tc_filter.pref === 49152 && bpfAttached.tc_filter.handle === 
   assert(bpfIdentity.clients[0].identity_key === '00:11:22:33:44:55@lan', 'BPF identity folding must allow real clients whose MAC starts with 00');
   assert(bpfIdentity.clients[0].ips.includes('192.168.31.110'), 'BPF identity folding must attach the ARP IP for a real 00-prefix client');
   assert(bpfIdentity.skipped_no_identity === 1, 'BPF identity folding must skip unknown 00-prefix MAC samples without LAN identity');
+}
+
+{
+  const filteredIdentity = simulateBpfIdentityFolding({
+    collect_ifnames: [ 'eth1' ],
+    interface_addresses: [
+      { interface: 'eth1', address: '192.168.31.1/24' },
+      { interface: 'eth0', address: '192.168.2.100/24' }
+    ],
+    arp_entries: [
+      { ip: '192.168.31.177', mac: 'd2:4f:70:5d:5e:8d', interface: 'eth1', zone: 'eth1' },
+      { ip: '10.19.153.104', mac: 'd2:4f:70:5d:5e:8d', interface: 'eth1', zone: 'eth1' },
+      { ip: '169.254.156.62', mac: 'd8:bb:c1:67:fe:bd', interface: 'eth1', zone: 'eth1' }
+    ],
+    neighbor_entries: [],
+    raw_bpf_samples: [
+      { mac: 'd2:4f:70:5d:5e:8d', zone: 'eth1', interface: 'eth1', direction: 'tx', bytes: 1000 },
+      { mac: 'd8:bb:c1:67:fe:bd', zone: 'eth1', interface: 'eth1', direction: 'tx', bytes: 2000 }
+    ]
+  });
+  assert(filteredIdentity.clients.length === 1, 'collected interface subnet filter must drop clients without an IP in that interface subnet');
+  assert(filteredIdentity.clients[0].identity_key === 'd2:4f:70:5d:5e:8d@eth1', 'collected interface subnet filter must keep the matching client identity');
+  assert(JSON.stringify(filteredIdentity.clients[0].ips) === JSON.stringify([ '192.168.31.177' ]),
+         'collected interface subnet filter must keep only IPs inside the collected interface subnet');
+  assert(filteredIdentity.skipped_no_identity === 1, 'collected interface subnet filter must skip MACs whose only IP is outside the collected interface subnet');
 }
 
 const uploadRate = computeRateTimeline(uploadRateFixture);
@@ -2843,8 +2954,19 @@ assert(nssDaedBpf.preferred === true, 'NSS+daed should still have a usable prefe
 assert(nssDaedBpf.primary_source === 'bpf', 'NSS+daed must prefer BPF over NSS direct when BPF is available');
 assert(nssDaedBpf.collector_mode === 'bpf', 'NSS+daed+BPF clients must use collector_mode=bpf');
 assert(nssDaedBpf.coverage_client_source === 'bpf', 'NSS+daed+BPF coverage must use BPF client bytes');
-assert(nssDaedBpf.warnings.includes('nss_daed_prefers_bpf'), 'NSS+daed+BPF must explain that BPF is preferred');
+assert(nssDaedBpf.warnings.includes('dae_runtime_prefers_bpf'), 'NSS+daed+BPF must explain that BPF is preferred');
 assert(!nssDaedBpf.warnings.includes('nss_prefers_direct'), 'NSS+daed+BPF must not claim NSS direct is preferred');
+
+const daeProcessBpf = simulateNssSourceSelection({
+  config: { enable_conntrack_fallback: true, bpf_full_available: true },
+  probe: {
+    nf_conntrack_acct: true,
+    nss_present: false,
+    dae_process: true
+  }
+});
+assert(daeProcessBpf.primary_source === 'bpf', 'a running dae process must keep BPF as the automatic rate source on non-NSS devices');
+assert(daeProcessBpf.warnings.includes('dae_runtime_prefers_bpf'), 'a running dae process must expose the automatic BPF decision');
 
 const nssDaedNssFallback = simulateNssSourceSelection({
   config: { enable_conntrack_fallback: true, bpf_full_available: false },
@@ -2858,7 +2980,7 @@ const nssDaedNssFallback = simulateNssSourceSelection({
 });
 assert(nssDaedNssFallback.primary_source === 'nss_conntrack_sync', 'NSS+daed must fall back to NSS sync when BPF is unavailable');
 assert(nssDaedNssFallback.collector_mode === 'conntrack_ecm_sync', 'NSS+daed NSS fallback must keep sync collector mode');
-assert(nssDaedNssFallback.warnings.includes('nss_daed_nss_fallback_may_be_inaccurate'), 'NSS+daed NSS fallback must warn that rates may be inaccurate');
+assert(nssDaedNssFallback.warnings.includes('nss_dae_bpf_fallback_may_be_inaccurate'), 'NSS+daed NSS fallback must warn that rates may be inaccurate');
 
 const nssDaedConfigOnly = simulateNssSourceSelection({
   config: { enable_conntrack_fallback: true, bpf_full_available: true },
@@ -2871,7 +2993,7 @@ const nssDaedConfigOnly = simulateNssSourceSelection({
   }
 });
 assert(nssDaedConfigOnly.primary_source === 'nss_conntrack_sync', 'NSS must keep NSS sync when only daed config exists');
-assert(!nssDaedConfigOnly.warnings.includes('nss_daed_prefers_bpf'), 'daed config alone must not emit NSS+daed BPF warning');
+assert(!nssDaedConfigOnly.warnings.includes('dae_runtime_prefers_bpf'), 'daed config alone must not emit dae/daed BPF warning');
 
 const nssDaedStoppedWithLeftovers = simulateNssSourceSelection({
   config: { enable_conntrack_fallback: true, bpf_full_available: true },
@@ -2885,7 +3007,7 @@ const nssDaedStoppedWithLeftovers = simulateNssSourceSelection({
   }
 });
 assert(nssDaedStoppedWithLeftovers.primary_source === 'nss_conntrack_sync', 'NSS must keep NSS sync when daed service exists but has no running instance');
-assert(!nssDaedStoppedWithLeftovers.warnings.includes('nss_daed_prefers_bpf'), 'stopped daed leftovers must not emit NSS+daed BPF warning');
+assert(!nssDaedStoppedWithLeftovers.warnings.includes('dae_runtime_prefers_bpf'), 'stopped daed leftovers must not emit dae/daed BPF warning');
 
 const nssForcedDirectWithDaed = simulateNssSourceSelection({
   config: { enable_conntrack_fallback: true, bpf_full_available: true, rate_collector_mode: 'nss_ecm_direct' },
@@ -2898,7 +3020,7 @@ const nssForcedDirectWithDaed = simulateNssSourceSelection({
   }
 });
 assert(nssForcedDirectWithDaed.primary_source === 'nss_ecm_direct', 'forced NSS-direct must override automatic NSS+daed BPF preference');
-assert(!nssForcedDirectWithDaed.warnings.includes('nss_daed_prefers_bpf'), 'forced NSS-direct must not claim automatic NSS+daed BPF preference');
+assert(!nssForcedDirectWithDaed.warnings.includes('dae_runtime_prefers_bpf'), 'forced NSS-direct must not claim automatic dae/daed BPF preference');
 
 const nssForcedDirectUnreadable = simulateNssSourceSelection({
   config: { enable_conntrack_fallback: true, bpf_full_available: false, rate_collector_mode: 'nss_ecm_direct' },
